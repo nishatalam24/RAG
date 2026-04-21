@@ -1,0 +1,39 @@
+# Node.js dependencies
+backend/node_modules/
+frontend/node_modules/
+
+# Build outputs
+backend/dist/
+frontend/dist/
+
+# Environment variables
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+
+# Logs
+logs/
+*.log
+
+# Database & uploads
+backend/lancedb_data/
+backend/uploads/
+uploads/
+lancedb_data/
+
+# Keep empty uploads folder
+!uploads/.gitkeep
+!backend/uploads/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE/editor files
+.vscode/
+.idea/
+*.swp
+
+# Misc
+*.local

@@ -1,0 +1,30 @@
+{
+  "name": "chatpdf-personal-history-backend",
+  "version": "1.0.0",
+  "description": "Simple ChatPDF backend with personal chat history using Node.js, Express, MongoDB, LanceDB, and Gemini API.",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test:gemini": "node scripts/testGemini.js",
+    "rebuild:vectors": "node scripts/rebuildVectors.js",
+    "client": "npm run dev --prefix frontend",
+    "client:build": "npm run build --prefix frontend"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@lancedb/lancedb": "^0.18.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.9.5",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
