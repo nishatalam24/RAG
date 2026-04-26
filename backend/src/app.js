@@ -29,5 +29,4 @@ app.use("/api/pdf", pdfRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/geofence", geofenceRoutes);
 
-
 export default app;
