@@ -6,14 +6,15 @@ import { connectLanceDB } from "./config/lancedb.js";
 dotenv.config();
 
 const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || "0.0.0.0";
 
 const startServer = async () => {
   try {
     await connectDB();
     await connectLanceDB();
 
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+    app.listen(PORT, HOST, () => {
+      console.log(`Server running on http://${HOST}:${PORT}`);
     });
   } catch (error) {
     console.error("Server start error:", error.message);

@@ -34,6 +34,7 @@ Update `.env`:
 
 ```env
 PORT=5000
+HOST=0.0.0.0
 MONGO_URI=mongodb://127.0.0.1:27017/chatpdf_history
 JWT_SECRET=change_this_secret
 GEMINI_API_KEY=your_gemini_api_key
@@ -64,6 +65,92 @@ Server URL:
 ```txt
 http://localhost:5000
 ```
+
+## Run On A Cloud Server Without Domain
+
+You can run the backend directly on a VPS public IP using HTTP for POC testing.
+
+### 1. Copy backend to server
+
+Upload this folder to your server:
+
+```txt
+RAG/backend
+```
+
+### 2. Install and configure
+
+```bash
+cd backend
+npm install
+```
+
+Create `.env`:
+
+```env
+PORT=5000
+HOST=0.0.0.0
+MONGO_URI=your_mongodb_connection_string
+JWT_SECRET=change_this_to_a_long_random_secret
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-3-flash-preview
+GEMINI_EMBEDDING_MODEL=gemini-embedding-2-preview
+GEMINI_EMBEDDING_DIMENSIONS=3072
+LANCEDB_PATH=./lancedb_data
+LANCEDB_TABLE=pdf_chunks_3072
+```
+
+### 3. Open inbound firewall
+
+Allow TCP port `5000` in your cloud firewall/security group.
+
+If the server uses UFW:
+
+```bash
+sudo ufw allow 5000/tcp
+```
+
+### 4. Start backend
+
+For quick testing:
+
+```bash
+npm start
+```
+
+For keeping it alive:
+
+```bash
+npm install -g pm2
+pm2 start src/server.js --name geofence-api
+pm2 save
+```
+
+### 5. Test from your browser
+
+Open:
+
+```txt
+http://YOUR_PUBLIC_IP:5000/
+```
+
+You should see the API running JSON response.
+
+### 6. Point Android app to server
+
+In the React Native app, edit:
+
+```txt
+mobile/src/config.ts
+```
+
+Set:
+
+```ts
+export const API_URL = 'http://YOUR_PUBLIC_IP:5000';
+```
+
+The Android manifest already allows HTTP cleartext traffic for this POC.
 
 ## Run React Frontend
 
