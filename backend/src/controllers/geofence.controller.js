@@ -2,6 +2,11 @@ import LocationLog from "../models/LocationLog.js";
 import User from "../models/User.js";
 import { sendParentGeofenceAlert } from "../services/fcm.js";
 import { getDistanceMeters, isValidCoordinate } from "../utils/geo.js";
+import {
+  logControllerError,
+  logControllerStart,
+  logControllerSuccess
+} from "../utils/controllerLogger.js";
 
 const requireRole = (user, role, res) => {
   if (user.role !== role) {
@@ -16,6 +21,11 @@ const requireRole = (user, role, res) => {
 };
 
 export const saveFcmToken = async (req, res) => {
+  logControllerStart("geofence.saveFcmToken", {
+    userId: req.user?._id?.toString(),
+    platform: req.body?.platform || "android"
+  });
+
   try {
     const { token, platform = "android" } = req.body;
 
@@ -31,11 +41,20 @@ export const saveFcmToken = async (req, res) => {
     user.fcmTokens.push({ token, platform, updatedAt: new Date() });
     await user.save();
 
+    logControllerSuccess("geofence.saveFcmToken", {
+      userId: req.user._id.toString(),
+      tokenCount: user.fcmTokens.length
+    });
+
     res.json({
       success: true,
       message: "FCM token saved"
     });
   } catch (error) {
+    logControllerError("geofence.saveFcmToken", error, {
+      userId: req.user?._id?.toString()
+    });
+
     res.status(500).json({
       success: false,
       message: error.message
@@ -44,6 +63,11 @@ export const saveFcmToken = async (req, res) => {
 };
 
 export const getChildren = async (req, res) => {
+  logControllerStart("geofence.getChildren", {
+    userId: req.user?._id?.toString(),
+    role: req.user?.role
+  });
+
   try {
     if (!requireRole(req.user, "parent", res)) return;
 
@@ -51,12 +75,21 @@ export const getChildren = async (req, res) => {
       "-password -fcmTokens"
     );
 
+    logControllerSuccess("geofence.getChildren", {
+      userId: req.user._id.toString(),
+      childCount: children.length
+    });
+
     res.json({
       success: true,
       inviteCode: req.user.inviteCode,
       children
     });
   } catch (error) {
+    logControllerError("geofence.getChildren", error, {
+      userId: req.user?._id?.toString()
+    });
+
     res.status(500).json({
       success: false,
       message: error.message
@@ -65,6 +98,11 @@ export const getChildren = async (req, res) => {
 };
 
 export const updateChildGeofence = async (req, res) => {
+  logControllerStart("geofence.updateChildGeofence", {
+    userId: req.user?._id?.toString(),
+    childId: req.params?.childId
+  });
+
   try {
     if (!requireRole(req.user, "parent", res)) return;
 
@@ -112,11 +150,22 @@ export const updateChildGeofence = async (req, res) => {
     delete childResponse.password;
     delete childResponse.fcmTokens;
 
+    logControllerSuccess("geofence.updateChildGeofence", {
+      userId: req.user._id.toString(),
+      childId: child._id.toString(),
+      radiusMeters
+    });
+
     res.json({
       success: true,
       child: childResponse
     });
   } catch (error) {
+    logControllerError("geofence.updateChildGeofence", error, {
+      userId: req.user?._id?.toString(),
+      childId: req.params?.childId
+    });
+
     res.status(500).json({
       success: false,
       message: error.message
@@ -125,6 +174,12 @@ export const updateChildGeofence = async (req, res) => {
 };
 
 export const submitLocation = async (req, res) => {
+  logControllerStart("geofence.submitLocation", {
+    userId: req.user?._id?.toString(),
+    lat: req.body?.lat,
+    lon: req.body?.lon
+  });
+
   try {
     if (!requireRole(req.user, "child", res)) return;
 
@@ -182,6 +237,13 @@ export const submitLocation = async (req, res) => {
       });
     }
 
+    logControllerSuccess("geofence.submitLocation", {
+      userId: req.user._id.toString(),
+      logId: log._id.toString(),
+      isOutside,
+      distanceMeters
+    });
+
     res.status(201).json({
       success: true,
       log,
@@ -194,6 +256,12 @@ export const submitLocation = async (req, res) => {
       }
     });
   } catch (error) {
+    logControllerError("geofence.submitLocation", error, {
+      userId: req.user?._id?.toString(),
+      lat: req.body?.lat,
+      lon: req.body?.lon
+    });
+
     res.status(500).json({
       success: false,
       message: error.message
@@ -202,6 +270,11 @@ export const submitLocation = async (req, res) => {
 };
 
 export const getLocationLogs = async (req, res) => {
+  logControllerStart("geofence.getLocationLogs", {
+    userId: req.user?._id?.toString(),
+    childId: req.query?.childId
+  });
+
   try {
     if (!requireRole(req.user, "parent", res)) return;
 
@@ -216,11 +289,22 @@ export const getLocationLogs = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(100);
 
+    logControllerSuccess("geofence.getLocationLogs", {
+      userId: req.user._id.toString(),
+      logCount: logs.length,
+      childId: req.query?.childId
+    });
+
     res.json({
       success: true,
       logs
     });
   } catch (error) {
+    logControllerError("geofence.getLocationLogs", error, {
+      userId: req.user?._id?.toString(),
+      childId: req.query?.childId
+    });
+
     res.status(500).json({
       success: false,
       message: error.message

@@ -3,6 +3,11 @@ import { createEmbedding } from "../config/gemini.js";
 import { getPdfChunksTable } from "../config/lancedb.js";
 import pdfExtract from "../services/pdfExtract.js";
 import chunkText from "../services/chunkText.js";
+import {
+  logControllerError,
+  logControllerStart,
+  logControllerSuccess
+} from "../utils/controllerLogger.js";
 
 const parseTags = (tags) => {
   if (!tags) return [];
@@ -14,6 +19,11 @@ const parseTags = (tags) => {
 };
 
 export const uploadPdf = async (req, res) => {
+  logControllerStart("pdf.uploadPdf", {
+    userId: req.user?._id?.toString(),
+    fileName: req.file?.filename
+  });
+
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -60,6 +70,13 @@ export const uploadPdf = async (req, res) => {
 
     await table.add(rows);
 
+    logControllerSuccess("pdf.uploadPdf", {
+      userId: req.user._id.toString(),
+      documentId: document._id.toString(),
+      fileName: document.fileName,
+      chunkCount: chunks.length
+    });
+
     res.status(201).json({
       success: true,
       message: "PDF uploaded and trained successfully",
@@ -71,6 +88,11 @@ export const uploadPdf = async (req, res) => {
       }
     });
   } catch (error) {
+    logControllerError("pdf.uploadPdf", error, {
+      userId: req.user?._id?.toString(),
+      fileName: req.file?.filename
+    });
+
     res.status(500).json({
       success: false,
       message: error.message

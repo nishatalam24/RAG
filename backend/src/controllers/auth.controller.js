@@ -1,6 +1,11 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import {
+  logControllerError,
+  logControllerStart,
+  logControllerSuccess
+} from "../utils/controllerLogger.js";
 
 const createToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, {
@@ -25,6 +30,11 @@ const toAuthUser = (user) => {
 };
 
 export const signup = async (req, res) => {
+  logControllerStart("auth.signup", {
+    email: req.body?.email,
+    role: req.body?.role || "parent"
+  });
+
   try {
     const { name, email, password, role = "parent", parentInviteCode } = req.body;
 
@@ -87,12 +97,23 @@ export const signup = async (req, res) => {
 
     const token = createToken(user._id);
 
+    logControllerSuccess("auth.signup", {
+      userId: user._id.toString(),
+      role: user.role
+    });
+
     res.status(201).json({
       success: true,
       token,
       user: toAuthUser(user)
     });
   } catch (error) {
+    logControllerError("auth.signup", error, {
+      email: req.body?.email,
+      role: req.body?.role || "parent",
+      hasParentInviteCode: Boolean(req.body?.parentInviteCode)
+    });
+
     res.status(500).json({
       success: false,
       message: error.message
@@ -101,6 +122,10 @@ export const signup = async (req, res) => {
 };
 
 export const login = async (req, res) => {
+  logControllerStart("auth.login", {
+    email: req.body?.email
+  });
+
   try {
     const { email, password } = req.body;
 
@@ -131,12 +156,21 @@ export const login = async (req, res) => {
 
     const token = createToken(user._id);
 
+    logControllerSuccess("auth.login", {
+      userId: user._id.toString(),
+      role: user.role
+    });
+
     res.json({
       success: true,
       token,
       user: toAuthUser(user)
     });
   } catch (error) {
+    logControllerError("auth.login", error, {
+      email: req.body?.email
+    });
+
     res.status(500).json({
       success: false,
       message: error.message

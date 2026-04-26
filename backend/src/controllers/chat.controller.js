@@ -2,6 +2,11 @@ import Chat from "../models/Chat.js";
 import Document from "../models/Document.js";
 import { createEmbedding, generateAnswer } from "../config/gemini.js";
 import { getPdfChunksTable } from "../config/lancedb.js";
+import {
+  logControllerError,
+  logControllerStart,
+  logControllerSuccess
+} from "../utils/controllerLogger.js";
 
 const findTagFromQuestion = (question, userTags) => {
   const lowerQuestion = question.toLowerCase();
@@ -49,6 +54,11 @@ const filterChunksByTag = (chunks, tag) => {
 };
 
 export const askQuestion = async (req, res) => {
+  logControllerStart("chat.askQuestion", {
+    userId: req.user?._id?.toString(),
+    questionLength: req.body?.question?.length
+  });
+
   try {
     const { question } = req.body;
 
@@ -104,12 +114,24 @@ Answer:
       answer
     });
 
+    logControllerSuccess("chat.askQuestion", {
+      userId: req.user._id.toString(),
+      chatId: savedChat._id.toString(),
+      matchedTag: foundTag || null,
+      chunkCount: pdfChunks.length
+    });
+
     res.json({
       success: true,
       answer,
       chatId: savedChat._id
     });
   } catch (error) {
+    logControllerError("chat.askQuestion", error, {
+      userId: req.user?._id?.toString(),
+      questionLength: req.body?.question?.length
+    });
+
     if (error.message?.includes("No vector column found")) {
       return res.status(500).json({
         success: false,
@@ -126,9 +148,18 @@ Answer:
 };
 
 export const getHistory = async (req, res) => {
+  logControllerStart("chat.getHistory", {
+    userId: req.user?._id?.toString()
+  });
+
   try {
     const chats = await Chat.find({ userId: req.user._id }).sort({
       createdAt: -1
+    });
+
+    logControllerSuccess("chat.getHistory", {
+      userId: req.user._id.toString(),
+      chatCount: chats.length
     });
 
     res.json({
@@ -136,6 +167,10 @@ export const getHistory = async (req, res) => {
       chats
     });
   } catch (error) {
+    logControllerError("chat.getHistory", error, {
+      userId: req.user?._id?.toString()
+    });
+
     res.status(500).json({
       success: false,
       message: error.message
