@@ -17,6 +17,13 @@ app.get("/", (req, res) => {
   });
 });
 
+app.get("/health", (req, res) => {
+  res.json({
+    success: true,
+    status: "ok"
+  });
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/pdf", pdfRoutes);
 app.use("/api/chat", chatRoutes);
