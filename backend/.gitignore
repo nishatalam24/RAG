@@ -1,0 +1,8 @@
+.env
+node_modules/
+lancedb_data/
+
+# Firebase Admin SDK service account credentials
+google-services.json
+firebase-service-account.json
+*service-account*.json

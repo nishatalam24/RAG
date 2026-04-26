@@ -42,6 +42,8 @@ GEMINI_MODEL=gemini-1.5-flash
 GEMINI_EMBEDDING_MODEL=text-embedding-004
 LANCEDB_PATH=./lancedb_data
 FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+# Easier on a server:
+FIREBASE_SERVICE_ACCOUNT_PATH=/home/ubuntu/geofence/firebase-service-account.json
 ```
 
 Make sure MongoDB is running locally or replace `MONGO_URI` with your MongoDB Atlas URL.
@@ -336,6 +338,62 @@ curl -X POST http://localhost:5000/api/geofence/child/location \
 ```
 
 The server calculates Haversine distance, stores every location log, and sends an FCM alert to the parent on every outside-geofence poll. If Firebase credentials are missing, the log is still saved and FCM is skipped.
+
+## FCM Setup For Parent Alerts
+
+The log `FCM skipped: Firebase credentials or parent tokens are missing` means one or both of these are missing:
+
+- Backend has no Firebase service account credentials.
+- Parent app has not saved its FCM token to `/api/geofence/fcm-token`.
+
+### 1. Firebase project
+
+Create a Firebase project and add an Android app with this package name:
+
+```txt
+com.geofencemobile
+```
+
+Download:
+
+- `google-services.json` for the Android app.
+- Service account JSON for the backend from Firebase project settings.
+
+### 2. Mobile app file
+
+Place `google-services.json` here before building the APK:
+
+```txt
+mobile/android/app/google-services.json
+```
+
+Then rebuild and install the Android app once.
+
+### 3. Backend server file
+
+Upload the service account JSON to your cloud server, for example:
+
+```txt
+/home/ubuntu/geofence/firebase-service-account.json
+```
+
+Set this in backend `.env`:
+
+```env
+FIREBASE_SERVICE_ACCOUNT_PATH=/home/ubuntu/geofence/firebase-service-account.json
+```
+
+Restart PM2:
+
+```bash
+pm2 restart rag-backend --update-env
+```
+
+### 4. Save parent token
+
+Open the app on the parent phone and login as the parent. The app will request notification permission, fetch the FCM token, and send it to the backend.
+
+After that, when the child sends an outside-geofence location, the server can send a push notification to the parent phone.
 
 ### 5. Get Chat History
 

@@ -1,4 +1,5 @@
 import admin from "firebase-admin";
+import fs from "fs";
 
 let initialized = false;
 
@@ -9,13 +10,17 @@ const initializeFirebase = () => {
   }
 
   const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
 
-  if (!serviceAccountJson) {
+  if (!serviceAccountJson && !serviceAccountPath) {
     return false;
   }
 
   try {
-    const serviceAccount = JSON.parse(serviceAccountJson);
+    const rawServiceAccount = serviceAccountPath
+      ? fs.readFileSync(serviceAccountPath, "utf8")
+      : serviceAccountJson;
+    const serviceAccount = JSON.parse(rawServiceAccount);
 
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
