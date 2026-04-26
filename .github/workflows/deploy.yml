@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  APP_DIR: /opt/rag-april
+  APP_DIR: /home/ubuntu/rag-april
   APP_NAME: rag-backend
   PORT: "5000"
 
