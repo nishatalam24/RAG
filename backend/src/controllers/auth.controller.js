@@ -8,14 +8,37 @@ const createToken = (userId) => {
   });
 };
 
+const createInviteCode = () => {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+};
+
+const toAuthUser = (user) => {
+  return {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    parent: user.parent,
+    inviteCode: user.inviteCode,
+    geofence: user.geofence
+  };
+};
+
 export const signup = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, role = "parent", parentInviteCode } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
         message: "Name, email, and password are required"
+      });
+    }
+
+    if (!["parent", "child"].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Role must be parent or child"
       });
     }
 
@@ -29,11 +52,37 @@ export const signup = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    let parent = null;
+
+    if (role === "child") {
+      if (!parentInviteCode) {
+        return res.status(400).json({
+          success: false,
+          message: "Parent invite code is required for child signup"
+        });
+      }
+
+      parent = await User.findOne({
+        inviteCode: parentInviteCode.toUpperCase(),
+        role: "parent"
+      });
+
+      if (!parent) {
+        return res.status(404).json({
+          success: false,
+          message: "Parent invite code is invalid"
+        });
+      }
+    }
 
     const user = await User.create({
       name,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      role,
+      parent: parent?._id || null,
+      inviteCode: role === "parent" ? createInviteCode() : undefined,
+      geofence: parent?.geofence || undefined
     });
 
     const token = createToken(user._id);
@@ -41,11 +90,7 @@ export const signup = async (req, res) => {
     res.status(201).json({
       success: true,
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email
-      }
+      user: toAuthUser(user)
     });
   } catch (error) {
     res.status(500).json({
@@ -89,11 +134,7 @@ export const login = async (req, res) => {
     res.json({
       success: true,
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email
-      }
+      user: toAuthUser(user)
     });
   } catch (error) {
     res.status(500).json({

@@ -40,6 +40,7 @@ GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-1.5-flash
 GEMINI_EMBEDDING_MODEL=text-embedding-004
 LANCEDB_PATH=./lancedb_data
+FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
 ```
 
 Make sure MongoDB is running locally or replace `MONGO_URI` with your MongoDB Atlas URL.
@@ -178,6 +179,76 @@ Response:
   "answer": "DBMS stands for Database Management System..."
 }
 ```
+
+## Geofence POC API
+
+Parents signup normally, then share their `inviteCode` with the child.
+
+### Parent signup
+
+```bash
+curl -X POST http://localhost:5000/api/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Parent",
+    "email": "parent@example.com",
+    "password": "123456",
+    "role": "parent"
+  }'
+```
+
+### Child signup
+
+```bash
+curl -X POST http://localhost:5000/api/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Child",
+    "email": "child@example.com",
+    "password": "123456",
+    "role": "child",
+    "parentInviteCode": "PARENT_CODE"
+  }'
+```
+
+### Save parent FCM token
+
+```bash
+curl -X POST http://localhost:5000/api/geofence/fcm-token \
+  -H "Authorization: Bearer PARENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"token":"FCM_DEVICE_TOKEN","platform":"android"}'
+```
+
+### Parent sets child geofence
+
+```bash
+curl -X PATCH http://localhost:5000/api/geofence/parent/children/CHILD_ID/geofence \
+  -H "Authorization: Bearer PARENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "centerLat": 28.545855,
+    "centerLon": 77.299128,
+    "radiusMeters": 500
+  }'
+```
+
+### Child location polling request
+
+Call this every 5 seconds from the Android app.
+
+```bash
+curl -X POST http://localhost:5000/api/geofence/child/location \
+  -H "Authorization: Bearer CHILD_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "lat": 28.541611,
+    "lon": 77.301153,
+    "accuracy": 12
+  }'
+```
+
+The server calculates Haversine distance, stores every location log, and sends an FCM alert to the parent on every outside-geofence poll. If Firebase credentials are missing, the log is still saved and FCM is skipped.
 
 ### 5. Get Chat History
 
