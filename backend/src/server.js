@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import app from "./app.js";
 import connectDB from "./config/db.js";
-import { connectLanceDB } from "./config/lancedb.js";
+import { connectVectorStore } from "./config/vectorStore.js";
 
 dotenv.config();
 
@@ -11,7 +11,7 @@ const HOST = process.env.HOST || "0.0.0.0";
 const startServer = async () => {
   try {
     await connectDB();
-    await connectLanceDB();
+    await connectVectorStore();
 
     app.listen(PORT, HOST, () => {
       console.log(`Server running on http://${HOST}:${PORT}`);

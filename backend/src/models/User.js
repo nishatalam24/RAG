@@ -4,7 +4,8 @@ const userSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true
+      required: true,
+      trim: true
     },
     email: {
       type: String,
@@ -19,56 +20,19 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["parent", "child"],
-      default: "parent",
+      enum: ["teacher", "student"],
       required: true
     },
-    parent: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null
-    },
-    inviteCode: {
+    primarySubject: {
       type: String,
-      unique: true,
-      sparse: true,
-      uppercase: true,
+      default: "",
       trim: true
     },
-    fcmTokens: [
-      {
-        token: {
-          type: String,
-          required: true
-        },
-        platform: {
-          type: String,
-          enum: ["android", "ios", "web"],
-          default: "android"
-        },
-        updatedAt: {
-          type: Date,
-          default: Date.now
-        }
-      }
-    ],
-    geofence: {
-      centerLat: {
-        type: Number,
-        default: 28.545855
-      },
-      centerLon: {
-        type: Number,
-        default: 77.299128
-      },
-      radiusMeters: {
-        type: Number,
-        default: 500
-      },
-      active: {
-        type: Boolean,
-        default: true
-      }
+    primarySubjectKey: {
+      type: String,
+      default: "",
+      lowercase: true,
+      trim: true
     }
   },
   { timestamps: true }

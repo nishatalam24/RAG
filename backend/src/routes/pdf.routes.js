@@ -1,9 +1,16 @@
 import express from "express";
+import fs from "fs";
 import multer from "multer";
 import auth from "../middleware/auth.js";
-import { uploadPdf } from "../controllers/pdf.controller.js";
+import {
+  getTeacherDocumentFile,
+  listTeacherDocuments,
+  uploadPdf
+} from "../controllers/pdf.controller.js";
 
 const router = express.Router();
+
+fs.mkdirSync("uploads", { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -27,5 +34,7 @@ const upload = multer({
 });
 
 router.post("/upload", auth, upload.single("file"), uploadPdf);
+router.get("/documents", auth, listTeacherDocuments);
+router.get("/documents/:id/file", auth, getTeacherDocumentFile);
 
 export default router;

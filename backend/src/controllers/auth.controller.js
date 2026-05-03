@@ -13,8 +13,12 @@ const createToken = (userId) => {
   });
 };
 
-const createInviteCode = () => {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
+const normalizeSubject = (subject = "") => {
+  return subject.trim().replace(/\s+/g, " ");
+};
+
+const getSubjectKey = (subject = "") => {
+  return normalizeSubject(subject).toLowerCase();
 };
 
 const toAuthUser = (user) => {
@@ -23,20 +27,24 @@ const toAuthUser = (user) => {
     name: user.name,
     email: user.email,
     role: user.role,
-    parent: user.parent,
-    inviteCode: user.inviteCode,
-    geofence: user.geofence
+    primarySubject: user.primarySubject
   };
 };
 
 export const signup = async (req, res) => {
   logControllerStart("auth.signup", {
     email: req.body?.email,
-    role: req.body?.role || "parent"
+    role: req.body?.role || "student"
   });
 
   try {
-    const { name, email, password, role = "parent", parentInviteCode } = req.body;
+    const {
+      name,
+      email,
+      password,
+      role = "student",
+      primarySubject
+    } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -45,10 +53,10 @@ export const signup = async (req, res) => {
       });
     }
 
-    if (!["parent", "child"].includes(role)) {
+    if (!["teacher", "student"].includes(role)) {
       return res.status(400).json({
         success: false,
-        message: "Role must be parent or child"
+        message: "Role must be teacher or student"
       });
     }
 
@@ -61,38 +69,24 @@ export const signup = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-    let parent = null;
+    const normalizedSubject = normalizeSubject(primarySubject);
 
-    if (role === "child") {
-      if (!parentInviteCode) {
-        return res.status(400).json({
-          success: false,
-          message: "Parent invite code is required for child signup"
-        });
-      }
-
-      parent = await User.findOne({
-        inviteCode: parentInviteCode.toUpperCase(),
-        role: "parent"
+    if (role === "teacher" && !normalizedSubject) {
+      return res.status(400).json({
+        success: false,
+        message: "Primary subject is required for teacher signup"
       });
-
-      if (!parent) {
-        return res.status(404).json({
-          success: false,
-          message: "Parent invite code is invalid"
-        });
-      }
     }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await User.create({
       name,
       email,
       password: hashedPassword,
       role,
-      parent: parent?._id || null,
-      inviteCode: role === "parent" ? createInviteCode() : undefined,
-      geofence: parent?.geofence || undefined
+      primarySubject: role === "teacher" ? normalizedSubject : "",
+      primarySubjectKey: role === "teacher" ? getSubjectKey(normalizedSubject) : ""
     });
 
     const token = createToken(user._id);
@@ -110,8 +104,7 @@ export const signup = async (req, res) => {
   } catch (error) {
     logControllerError("auth.signup", error, {
       email: req.body?.email,
-      role: req.body?.role || "parent",
-      hasParentInviteCode: Boolean(req.body?.parentInviteCode)
+      role: req.body?.role || "student"
     });
 
     res.status(500).json({
