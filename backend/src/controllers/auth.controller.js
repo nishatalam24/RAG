@@ -27,7 +27,8 @@ const toAuthUser = (user) => {
     name: user.name,
     email: user.email,
     role: user.role,
-    primarySubject: user.primarySubject
+    primarySubject: user.primarySubject,
+    enrolmentNumber: user.enrolmentNumber || ""
   };
 };
 
@@ -43,7 +44,8 @@ export const signup = async (req, res) => {
       email,
       password,
       role = "student",
-      primarySubject
+      primarySubject,
+      enrolmentNumber
     } = req.body;
 
     if (!name || !email || !password) {
@@ -70,11 +72,21 @@ export const signup = async (req, res) => {
     }
 
     const normalizedSubject = normalizeSubject(primarySubject);
+    const normalizedEnrolment = String(enrolmentNumber || "")
+      .trim()
+      .toUpperCase();
 
     if (role === "teacher" && !normalizedSubject) {
       return res.status(400).json({
         success: false,
         message: "Primary subject is required for teacher signup"
+      });
+    }
+
+    if (role === "student" && !normalizedEnrolment) {
+      return res.status(400).json({
+        success: false,
+        message: "Enrolment number is required for student signup"
       });
     }
 
@@ -86,7 +98,8 @@ export const signup = async (req, res) => {
       password: hashedPassword,
       role,
       primarySubject: role === "teacher" ? normalizedSubject : "",
-      primarySubjectKey: role === "teacher" ? getSubjectKey(normalizedSubject) : ""
+      primarySubjectKey: role === "teacher" ? getSubjectKey(normalizedSubject) : "",
+      enrolmentNumber: role === "student" ? normalizedEnrolment : ""
     });
 
     const token = createToken(user._id);

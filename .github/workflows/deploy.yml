@@ -1,47 +1,47 @@
-name: Deploy Backend To VM
+# name: Deploy Backend To VM
 
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+# on:
+#   push:
+#     branches:
+#       - main
+#   workflow_dispatch:
 
-env:
-  APP_DIR: /home/ubuntu/rag-april
-  APP_NAME: rag-backend
-  PORT: "5000"
+# env:
+#   APP_DIR: /home/ubuntu/rag-april
+#   APP_NAME: rag-backend
+#   PORT: "5000"
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+# jobs:
+#   deploy:
+#     runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
 
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s' "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+#       - name: Configure SSH
+#         run: |
+#           mkdir -p ~/.ssh
+#           printf '%s' "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+#           chmod 600 ~/.ssh/id_rsa
+#           ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Deploy backend with PM2 on VM
-        env:
-          BACKEND_ENV_FILE: ${{ secrets.BACKEND_ENV_FILE }}
-        run: |
-          BACKEND_ENV_B64="$(printf '%s' "$BACKEND_ENV_FILE" | base64 | tr -d '\n')"
-          ssh "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
-            "export APP_DIR='${APP_DIR}' \
-            REPO_URL='${{ secrets.VM_REPO_URL }}' \
-            DEPLOY_REF='${GITHUB_SHA}' \
-            APP_NAME='${APP_NAME}' \
-            PORT='${PORT}' \
-            PRIVATE_IP='${{ secrets.VM_PRIVATE_IP }}' \
-            BACKEND_ENV_B64='${BACKEND_ENV_B64}'; \
-            bash -s" < scripts/deploy-vm.sh
+#       - name: Deploy backend with PM2 on VM
+#         env:
+#           BACKEND_ENV_FILE: ${{ secrets.BACKEND_ENV_FILE }}
+#         run: |
+#           BACKEND_ENV_B64="$(printf '%s' "$BACKEND_ENV_FILE" | base64 | tr -d '\n')"
+#           ssh "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
+#             "export APP_DIR='${APP_DIR}' \
+#             REPO_URL='${{ secrets.VM_REPO_URL }}' \
+#             DEPLOY_REF='${GITHUB_SHA}' \
+#             APP_NAME='${APP_NAME}' \
+#             PORT='${PORT}' \
+#             PRIVATE_IP='${{ secrets.VM_PRIVATE_IP }}' \
+#             BACKEND_ENV_B64='${BACKEND_ENV_B64}'; \
+#             bash -s" < scripts/deploy-vm.sh
 
-      - name: Test backend using VM public IP
-        run: |
-          curl --fail --show-error --silent \
-            "http://${{ secrets.VM_PUBLIC_IP }}:${PORT}/health"
+#       - name: Test backend using VM public IP
+#         run: |
+#           curl --fail --show-error --silent \
+#             "http://${{ secrets.VM_PUBLIC_IP }}:${PORT}/health"

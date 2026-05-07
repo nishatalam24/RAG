@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Link,
   Navigate,
@@ -43,6 +43,8 @@ class AppErrorBoundary extends React.Component {
 }
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const ATTENDANCE_API_URL =
+  import.meta.env.VITE_ATTENDANCE_API_URL || "http://158.180.17.208:3000";
 
 const SUBJECT_PALETTES = [
   {
@@ -86,6 +88,84 @@ const getSavedUser = () => {
     localStorage.removeItem("chatpdf_token");
     return null;
   }
+};
+
+const ENROLMENT_STORAGE_KEY = "chatpdf_enrolment_by_email";
+const ATTENDANCE_CACHE_KEY = "chatpdf_attendance_cache_by_enrol";
+const ATTENDANCE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const readEnrolmentByEmail = () => {
+  try {
+    const raw = localStorage.getItem(ENROLMENT_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    localStorage.removeItem(ENROLMENT_STORAGE_KEY);
+    return {};
+  }
+};
+
+const writeEnrolmentForEmail = (email, enrolmentNumber) => {
+  if (!email) return;
+  const trimmed = String(enrolmentNumber || "").trim();
+  const mapping = readEnrolmentByEmail();
+
+  if (!trimmed) {
+    delete mapping[email];
+  } else {
+    mapping[email] = trimmed;
+  }
+
+  localStorage.setItem(ENROLMENT_STORAGE_KEY, JSON.stringify(mapping));
+};
+
+const readAttendanceCache = () => {
+  try {
+    const raw = localStorage.getItem(ATTENDANCE_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    localStorage.removeItem(ATTENDANCE_CACHE_KEY);
+    return {};
+  }
+};
+
+const writeAttendanceCache = (enrolmentNumber, data) => {
+  const safeEnrol = String(enrolmentNumber || "").trim().toUpperCase();
+  if (!safeEnrol) return;
+  const cache = readAttendanceCache();
+  cache[safeEnrol] = { savedAt: Date.now(), data };
+  localStorage.setItem(ATTENDANCE_CACHE_KEY, JSON.stringify(cache));
+};
+
+const getCachedAttendance = (enrolmentNumber) => {
+  const safeEnrol = String(enrolmentNumber || "").trim().toUpperCase();
+  if (!safeEnrol) return null;
+  const cache = readAttendanceCache();
+  const entry = cache?.[safeEnrol];
+  if (!entry?.savedAt || !entry?.data) return null;
+  if (Date.now() - entry.savedAt > ATTENDANCE_CACHE_TTL_MS) return null;
+  return entry.data;
+};
+
+const fetchAttendanceByEnrolment = async (enrolmentNumber) => {
+  const safeEnrol = String(enrolmentNumber || "").trim();
+  if (!safeEnrol) {
+    throw new Error("Enrolment number is required");
+  }
+
+  const response = await fetch(
+    `${ATTENDANCE_API_URL}/api/attendance/student/${encodeURIComponent(
+      safeEnrol.toUpperCase()
+    )}`
+  );
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data?.error || data?.message || "Unable to fetch attendance");
+  }
+
+  return data;
 };
 
 const formatDate = (value) => {
@@ -489,6 +569,108 @@ const SubjectWorkspace = ({ authHeaders, subjects, onError }) => {
   );
 };
 
+const AttendanceViewer = ({ enrolmentNumber, setEnrolmentNumber, setNotice }) => {
+  const [loading, setLoading] = useState(false);
+  const [attendanceData, setAttendanceData] = useState(() =>
+    getCachedAttendance(enrolmentNumber)
+  );
+
+  const handleFetch = useCallback(async () => {
+    setLoading(true);
+    setNotice("");
+
+    try {
+      const data = await fetchAttendanceByEnrolment(enrolmentNumber);
+      setAttendanceData(data);
+      writeAttendanceCache(enrolmentNumber, data);
+      setNotice("Attendance fetched");
+    } catch (error) {
+      setAttendanceData(null);
+      setNotice(error.message || "Unable to fetch attendance");
+    } finally {
+      setLoading(false);
+    }
+  }, [enrolmentNumber, setNotice]);
+
+  useEffect(() => {
+    const cached = getCachedAttendance(enrolmentNumber);
+    if (cached) {
+      setAttendanceData(cached);
+    }
+    if (!enrolmentNumber || attendanceData || loading) return;
+    handleFetch();
+  }, [attendanceData, enrolmentNumber, handleFetch, loading]);
+
+  const attends = Array.isArray(attendanceData?.attends) ? attendanceData.attends : [];
+
+  return (
+    <section className="student-shell">
+      <div className="page-intro">
+        <p className="eyebrow">Attendance</p>
+        <h2>Fetch attendance by enrolment number.</h2>
+        <p>Uses the attendance microservice configured in `VITE_ATTENDANCE_API_URL`.</p>
+      </div>
+
+      <section className="panel attendance-panel">
+        <label>
+          Enrolment number
+          <input
+            type="text"
+            value={enrolmentNumber}
+            onChange={(event) => setEnrolmentNumber(event.target.value.toUpperCase())}
+            placeholder="ENR001"
+          />
+        </label>
+
+        <button className="primary-button" type="button" onClick={handleFetch} disabled={loading}>
+          {loading ? "Fetching..." : "Fetch attendance"}
+        </button>
+
+        {attendanceData?.student ? (
+          <div className="attendance-student">
+            <h3>{attendanceData.student?.name || "Student"}</h3>
+            <p>
+              {attendanceData.student?.enrolmentNumber
+                ? `Enrolment: ${attendanceData.student.enrolmentNumber}`
+                : null}
+              {attendanceData.student?.course ? ` • Course: ${attendanceData.student.course}` : null}
+            </p>
+          </div>
+        ) : null}
+
+        {attendanceData ? (
+          attends.length === 0 ? (
+            <p className="empty-text">No attendance records found.</p>
+          ) : (
+            <div className="attendance-list">
+              {attends.map((entry, index) => (
+                <article className="attendance-card" key={entry?._id || `${entry?.date}-${index}`}>
+                  <div className="attendance-card-top">
+                    <strong>{entry?.date ? formatDate(entry.date) : "Attendance"}</strong>
+                    {typeof entry?.status === "string" ? (
+                      <span className="chip">{entry.status}</span>
+                    ) : entry?.present !== undefined ? (
+                      <span className="chip">{entry.present ? "Present" : "Absent"}</span>
+                    ) : null}
+                  </div>
+                  <pre className="attendance-meta">
+                    {JSON.stringify(entry, null, 2)}
+                  </pre>
+                </article>
+              ))}
+            </div>
+          )
+        ) : (
+          <p className="empty-text">
+            Enter an enrolment number and fetch to see attendance.
+          </p>
+        )}
+      </section>
+
+    </section>
+  );
+};
+
 const TeacherDashboard = ({ authHeaders, user, onError, notice, setNotice }) => {
   const [pdfFile, setPdfFile] = useState(null);
   const [uploadForm, setUploadForm] = useState({
@@ -676,7 +858,17 @@ const TeacherDashboard = ({ authHeaders, user, onError, notice, setNotice }) => 
   );
 };
 
-const AuthScreen = ({ authMode, setAuthMode, authForm, setAuthForm, onSubmit, loading }) => {
+const AuthScreen = ({
+  authMode,
+  setAuthMode,
+  authForm,
+  setAuthForm,
+  onSubmit,
+  loading,
+  onPreviewAttendance,
+  previewLoading,
+  attendancePreview
+}) => {
   return (
     <section className="auth-layout">
       <div className="info-panel">
@@ -748,7 +940,53 @@ const AuthScreen = ({ authMode, setAuthMode, authForm, setAuthForm, onSubmit, lo
                   placeholder="DBMS"
                 />
               </label>
-            ) : null}
+            ) : (
+              <>
+                <label>
+                  Enrolment number
+                  <input
+                    type="text"
+                    value={authForm.enrolmentNumber}
+                    onChange={(event) =>
+                      setAuthForm({
+                        ...authForm,
+                        enrolmentNumber: event.target.value.toUpperCase()
+                      })
+                    }
+                    placeholder="ENR001"
+                  />
+                </label>
+
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={onPreviewAttendance}
+                  disabled={previewLoading}
+                >
+                  {previewLoading ? "Checking..." : "Preview attendance"}
+                </button>
+
+                {attendancePreview ? (
+                  <section className="preview-panel">
+                    <p className="eyebrow">Attendance preview</p>
+                    {attendancePreview?.student ? (
+                      <p>
+                        {attendancePreview.student?.name || "Student"}{" "}
+                        {attendancePreview.student?.course
+                          ? `• ${attendancePreview.student.course}`
+                          : ""}
+                      </p>
+                    ) : null}
+                    <p>
+                      Records:{" "}
+                      {Array.isArray(attendancePreview?.attends)
+                        ? attendancePreview.attends.length
+                        : 0}
+                    </p>
+                  </section>
+                ) : null}
+              </>
+            )}
           </>
         ) : null}
 
@@ -791,11 +1029,15 @@ function AppContent() {
     email: "",
     password: "",
     role: "teacher",
-    primarySubject: ""
+    primarySubject: "",
+    enrolmentNumber: ""
   });
   const [subjects, setSubjects] = useState([]);
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [attendancePreview, setAttendancePreview] = useState(null);
+  const [studentEnrolmentNumber, setStudentEnrolmentNumber] = useState("");
 
   const isLoggedIn = Boolean(token);
   const isTeacher = user?.role === "teacher";
@@ -817,6 +1059,22 @@ function AppContent() {
     setUser(data.user);
   };
 
+  const hydrateStudentEnrolment = (email, enrolmentFromServer) => {
+    if (enrolmentFromServer) {
+      setStudentEnrolmentNumber(String(enrolmentFromServer));
+      return;
+    }
+
+    if (user?.enrolmentNumber) {
+      setStudentEnrolmentNumber(String(user.enrolmentNumber));
+      return;
+    }
+
+    const mapping = readEnrolmentByEmail();
+    const stored = mapping?.[email] ? String(mapping[email]) : "";
+    setStudentEnrolmentNumber(stored);
+  };
+
   const fetchSubjects = async () => {
     try {
       const response = await fetch(`${API_URL}/api/learning/subjects`, {
@@ -834,6 +1092,23 @@ function AppContent() {
     }
   };
 
+  const handlePreviewAttendance = async () => {
+    setPreviewLoading(true);
+    setAttendancePreview(null);
+    setNotice("");
+
+    try {
+      const data = await fetchAttendanceByEnrolment(authForm.enrolmentNumber);
+      setAttendancePreview(data);
+      setNotice("Attendance preview fetched");
+    } catch (error) {
+      setAttendancePreview(null);
+      setNotice(error.message || "Unable to fetch attendance preview");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const handleAuthSubmit = async (event) => {
     event.preventDefault();
     setLoading(true);
@@ -845,6 +1120,14 @@ function AppContent() {
         authMode === "signup"
           ? authForm
           : { email: authForm.email, password: authForm.password };
+
+      if (
+        authMode === "signup" &&
+        body?.role === "student" &&
+        !String(body?.enrolmentNumber || "").trim()
+      ) {
+        throw new Error("Enrolment number is required for student signup");
+      }
 
       const response = await fetch(url, {
         method: "POST",
@@ -860,6 +1143,13 @@ function AppContent() {
       }
 
       saveLogin(data);
+      if (authMode === "signup" && body?.role === "student") {
+        writeEnrolmentForEmail(data?.user?.email || body?.email, body.enrolmentNumber);
+      }
+      hydrateStudentEnrolment(
+        data?.user?.email || body?.email,
+        data?.user?.enrolmentNumber || body?.enrolmentNumber
+      );
       setNotice(authMode === "signup" ? "Account created successfully" : "Login successful");
     } catch (error) {
       showError(error);
@@ -875,6 +1165,8 @@ function AppContent() {
     setUser(null);
     setSubjects([]);
     setNotice("Logged out");
+    setAttendancePreview(null);
+    setStudentEnrolmentNumber("");
     navigate("/");
   };
 
@@ -882,6 +1174,32 @@ function AppContent() {
     if (!token || !isStudent) return;
     fetchSubjects();
   }, [token, isStudent]);
+
+  useEffect(() => {
+    setAttendancePreview(null);
+  }, [authMode, authForm.role]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !isStudent) return;
+    hydrateStudentEnrolment(user?.email);
+  }, [isLoggedIn, isStudent, user?.email]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !isStudent) return;
+    writeEnrolmentForEmail(user?.email, studentEnrolmentNumber);
+  }, [isLoggedIn, isStudent, studentEnrolmentNumber, user?.email]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !isStudent) return;
+    if (!studentEnrolmentNumber) return;
+    if (getCachedAttendance(studentEnrolmentNumber)) return;
+
+    fetchAttendanceByEnrolment(studentEnrolmentNumber)
+      .then((data) => {
+        writeAttendanceCache(studentEnrolmentNumber, data);
+      })
+      .catch(() => {});
+  }, [isLoggedIn, isStudent, studentEnrolmentNumber]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -910,9 +1228,14 @@ function AppContent() {
             </div>
             <nav className="top-nav">
               {isStudent ? (
-                <NavLink className="nav-chip" to="/subjects">
-                  Subjects
-                </NavLink>
+                <>
+                  <NavLink className="nav-chip" to="/subjects">
+                    Subjects
+                  </NavLink>
+                  <NavLink className="nav-chip" to="/attendance">
+                    Attendance
+                  </NavLink>
+                </>
               ) : (
                 <NavLink className="nav-chip" to="/teacher">
                   Teacher
@@ -936,6 +1259,9 @@ function AppContent() {
           setAuthForm={setAuthForm}
           onSubmit={handleAuthSubmit}
           loading={loading}
+          onPreviewAttendance={handlePreviewAttendance}
+          previewLoading={previewLoading}
+          attendancePreview={attendancePreview}
         />
       ) : isTeacher ? (
         <Routes>
@@ -956,6 +1282,16 @@ function AppContent() {
       ) : (
         <Routes>
           <Route path="/subjects" element={<SubjectShelf subjects={subjects} />} />
+          <Route
+            path="/attendance"
+            element={
+              <AttendanceViewer
+                enrolmentNumber={studentEnrolmentNumber}
+                setEnrolmentNumber={setStudentEnrolmentNumber}
+                setNotice={setNotice}
+              />
+            }
+          />
           <Route
             path="/subjects/:subjectSlug"
             element={

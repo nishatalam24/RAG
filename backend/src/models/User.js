@@ -33,6 +33,11 @@ const userSchema = new mongoose.Schema(
       default: "",
       lowercase: true,
       trim: true
+    },
+    enrolmentNumber: {
+      type: String,
+      default: "",
+      trim: true
     }
   },
   { timestamps: true }
