@@ -8,6 +8,7 @@ import {
   logControllerStart,
   logControllerSuccess
 } from "../utils/controllerLogger.js";
+import { toLocalDateKey } from "../utils/dateKey.js";
 import path from "path";
 
 const buildFileUrl = (req, storedFileName) => {
@@ -139,7 +140,7 @@ export const uploadPdf = async (req, res) => {
         documentId: document._id.toString(),
         subject,
         subjectKey,
-        classDate: bounds.start.toISOString().slice(0, 10),
+        classDate: toLocalDateKey(bounds.start),
         fileName: req.file.originalname,
         chunkIndex: index,
         text: chunk,

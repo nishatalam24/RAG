@@ -40,10 +40,37 @@ JWT_SECRET=change_this_secret
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-1.5-flash
 GEMINI_EMBEDDING_MODEL=text-embedding-004
+# Optional: cache Gemini calls to avoid repeat LLM hits
+LANGCACHE_ENABLED=true
+LANGCACHE_DIR=./.cache
+# LANGCACHE_TTL_SECONDS=0  # 0 = never expire
+# LANGCACHE_LOGS=true      # red=LLM call, blue=cache hit
+# Optional: semantic cache (reuse answer for similar questions)
+# SEMANTIC_CACHE_MAX_DISTANCE=0.12
 LANCEDB_PATH=./lancedb_data
 FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
 # Easier on a server:
 FIREBASE_SERVICE_ACCOUNT_PATH=/home/ubuntu/geofence/firebase-service-account.json
+
+### Reset / Flush everything
+
+Dry run (shows what will be deleted):
+
+```bash
+npm run flush:all
+```
+
+Real flush (deletes: `.cache`, `uploads`, Postgres `pdf_chunks` + `semantic_answer_cache`, Mongo `Chat` + `Document` + `LocationLog`):
+
+```bash
+CONFIRM=YES DRY_RUN=false npm run flush:all
+```
+
+Also delete all users (optional):
+
+```bash
+CONFIRM=YES DRY_RUN=false FLUSH_USERS=true npm run flush:all
+```
 ```
 
 Make sure MongoDB is running locally or replace `MONGO_URI` with your MongoDB Atlas URL.
