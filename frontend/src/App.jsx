@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
   Navigate,
@@ -201,57 +201,132 @@ const getSubjectPalette = (subject) => {
   return SUBJECT_PALETTES[seed % SUBJECT_PALETTES.length];
 };
 
-const renderRichText = (text) => {
-  const lines = text
+const renderRichText = (text = "") => {
+  const lines = String(text)
+    .replace(/\r\n/g, "\n")
     .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+    .map((line) => line.trimEnd());
+
+  const renderInline = (value) => {
+    const normalized = String(value).replace(/\*\*\*/g, "**");
+    const chunks = normalized.split("**");
+    if (chunks.length === 1) return value;
+
+    return chunks.map((chunk, index) => {
+      const isBold = index % 2 === 1;
+      if (!chunk) return null;
+      return isBold ? <strong key={`${chunk}-${index}`}>{chunk}</strong> : chunk;
+    });
+  };
 
   const elements = [];
   let listItems = [];
+  let listType = null; // "ul" | "ol"
 
   const flushList = () => {
-    if (listItems.length === 0) return;
+    if (listItems.length === 0 || !listType) return;
 
+    const Tag = listType === "ol" ? "ol" : "ul";
     elements.push(
-      <ul className="rich-list" key={`list-${elements.length}`}>
+      <Tag className="rich-list" key={`list-${elements.length}`}>
         {listItems.map((item, index) => (
-          <li key={`${item}-${index}`}>{item}</li>
+          <li key={`${index}-${String(item).slice(0, 12)}`}>{renderInline(item)}</li>
         ))}
-      </ul>
+      </Tag>
     );
+
     listItems = [];
+    listType = null;
   };
 
-  lines.forEach((line) => {
-    const cleanLine = line.replace(/\*\*/g, "").replace(/^#+\s*/, "");
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushList();
+      continue;
+    }
 
-    if (/^[-*]\s+/.test(line)) {
-      listItems.push(cleanLine.replace(/^[-*]\s+/, ""));
-      return;
+    const headingMatch = line.replace(/^\*+\s*/, "").match(/^(#{1,6})\s+(.*)$/);
+    if (headingMatch) {
+      flushList();
+      const content = headingMatch[2].trim();
+      elements.push(
+        <h4 className="rich-heading" key={`h-${elements.length}`}>
+          {renderInline(content)}
+        </h4>
+      );
+      continue;
+    }
+
+    const ulMatch = line.match(/^[-*]\s+(.*)$/);
+    if (ulMatch) {
+      if (listType && listType !== "ul") flushList();
+      listType = "ul";
+      listItems.push(ulMatch[1].trim());
+      continue;
+    }
+
+    const olMatch = line.match(/^\d+\.\s+(.*)$/);
+    if (olMatch) {
+      if (listType && listType !== "ol") flushList();
+      listType = "ol";
+      listItems.push(olMatch[1].trim());
+      continue;
     }
 
     flushList();
-
-    if (/^#{1,6}\s*/.test(line)) {
-      elements.push(
-        <h4 className="rich-heading" key={`${cleanLine}-${elements.length}`}>
-          {cleanLine}
-        </h4>
-      );
-      return;
-    }
-
     elements.push(
-      <p className="rich-paragraph" key={`${cleanLine}-${elements.length}`}>
-        {cleanLine}
+      <p className="rich-paragraph" key={`p-${elements.length}`}>
+        {renderInline(line)}
       </p>
     );
-  });
+  }
 
   flushList();
-
   return elements;
+};
+
+const parseQuizPayload = (value) => {
+  if (!value) return null;
+
+  // Stored as JSON string in chat.answer (or server might return markdown/plain).
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed?.quiz?.questions && (parsed.quizId || parsed.quiz?.id)) {
+      return {
+        quizId: parsed.quizId || parsed.quiz.id,
+        quiz: parsed.quiz
+      };
+    }
+  } catch {
+    // ignore
+  }
+
+  return null;
+};
+
+const fetchPdfObjectUrl = async ({ documentId, authHeaders }) => {
+  if (!documentId) {
+    throw new Error("Document id is required");
+  }
+
+  const response = await fetch(`${API_URL}/api/pdf/documents/${documentId}/file`, {
+    headers: authHeaders
+  });
+
+  if (!response.ok) {
+    let message = "Unable to load PDF";
+    try {
+      const data = await response.json();
+      message = data?.message || data?.error || message;
+    } catch {
+      // ignore (likely a non-JSON error)
+    }
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 };
 
 const SubjectShelf = ({ subjects }) => {
@@ -301,11 +376,15 @@ const SubjectWorkspace = ({ authHeaders, subjects, onError }) => {
   const { subjectSlug, classId } = useParams();
   const [classDates, setClassDates] = useState([]);
   const [selectedClass, setSelectedClass] = useState(null);
+  const [pdfUrl, setPdfUrl] = useState("");
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState("");
   const [chats, setChats] = useState([]);
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
+  const chatScrollRef = useRef(null);
+  const [quizState, setQuizState] = useState({}); // quizId -> {answers, submitted, result}
   const safeSubjects = Array.isArray(subjects) ? subjects : [];
 
   const subjectRecord = useMemo(() => {
@@ -384,7 +463,8 @@ const SubjectWorkspace = ({ authHeaders, subjects, onError }) => {
           throw new Error(data.message);
         }
 
-        setChats(data.chats);
+        // API returns newest-first; render as oldest->newest for a ChatGPT-style thread.
+        setChats(Array.isArray(data.chats) ? [...data.chats].reverse() : []);
       } catch (error) {
         onError(error);
       }
@@ -393,22 +473,79 @@ const SubjectWorkspace = ({ authHeaders, subjects, onError }) => {
     loadHistory();
   }, [authHeaders, onError, selectedClass, subjectName]);
 
+  useEffect(() => {
+    if (!chatScrollRef.current) return;
+    // Keep newest messages visible after send/receive.
+    chatScrollRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [chats.length, loading]);
+
   const handleDateSelect = (entry) => {
     setSelectedClass(entry);
-    setAnswer("");
     navigate(`/subjects/${subjectSlug}/${entry.id}`);
   };
+
+  const handleLoadPdf = useCallback(async () => {
+    if (!selectedClass?.id) return;
+
+    setPdfLoading(true);
+    setPdfError("");
+
+    try {
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl);
+      }
+
+      const url = await fetchPdfObjectUrl({
+        documentId: selectedClass.id,
+        authHeaders
+      });
+      setPdfUrl(url);
+    } catch (error) {
+      setPdfUrl("");
+      setPdfError(error.message || "Unable to load PDF");
+    } finally {
+      setPdfLoading(false);
+    }
+  }, [authHeaders, pdfUrl, selectedClass?.id]);
+
+  useEffect(() => {
+    setPdfError("");
+    if (pdfUrl) {
+      URL.revokeObjectURL(pdfUrl);
+    }
+    setPdfUrl("");
+    setPdfLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClass?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl);
+      }
+    };
+  }, [pdfUrl]);
 
   const handleAskQuestion = async (event) => {
     event.preventDefault();
 
-    if (!question.trim() || !selectedClass || !subjectName) {
+    const trimmed = question.trim();
+    if (!trimmed || !selectedClass || !subjectName) {
       onError(new Error("Choose a class date and enter a question"));
       return;
     }
 
+    const tempId = `temp-${Date.now()}`;
+    const optimisticTurn = {
+      _id: tempId,
+      question: trimmed,
+      answer: "",
+      pending: true
+    };
+
     setLoading(true);
-    setAnswer("");
+    setQuestion("");
+    setChats((prev) => [...prev, optimisticTurn]);
 
     try {
       const response = await fetch(`${API_URL}/api/chat/ask`, {
@@ -418,7 +555,7 @@ const SubjectWorkspace = ({ authHeaders, subjects, onError }) => {
           ...authHeaders
         },
         body: JSON.stringify({
-          question,
+          question: trimmed,
           subject: subjectName,
           classDate: selectedClass.classDate
         })
@@ -429,8 +566,14 @@ const SubjectWorkspace = ({ authHeaders, subjects, onError }) => {
         throw new Error(data.message);
       }
 
-      setAnswer(data.answer);
-      setQuestion("");
+      // Update the optimistic turn immediately for snappy UI.
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat._id === tempId
+            ? { ...chat, answer: data.answer || "", pending: false }
+            : chat
+        )
+      );
 
       const params = new URLSearchParams({
         subject: subjectName,
@@ -446,7 +589,163 @@ const SubjectWorkspace = ({ authHeaders, subjects, onError }) => {
         throw new Error(historyData.message);
       }
 
-      setChats(historyData.chats);
+      setChats(Array.isArray(historyData.chats) ? [...historyData.chats].reverse() : []);
+    } catch (error) {
+      setChats((prev) => prev.filter((chat) => chat._id !== tempId));
+      onError(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGenerateQuiz = async () => {
+    if (!selectedClass || !subjectName) {
+      onError(new Error("Choose a class date first"));
+      return;
+    }
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticTurn = {
+      _id: tempId,
+      question: "Generate a quiz for this class",
+      answer: "",
+      pending: true
+    };
+
+    setLoading(true);
+    setChats((prev) => [...prev, optimisticTurn]);
+
+    try {
+      const response = await fetch(`${API_URL}/api/chat/quiz`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders
+        },
+        body: JSON.stringify({
+          subject: subjectName,
+          classDate: selectedClass.classDate
+        })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message);
+      }
+
+      if (data?.quizId && data?.quiz) {
+        setQuizState((prev) => ({
+          ...prev,
+          [String(data.quizId)]: { answers: {}, submitted: false, result: null }
+        }));
+      }
+
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat._id === tempId
+            ? { ...chat, answer: data.answer || JSON.stringify({ quizId: data.quizId, quiz: data.quiz }), pending: false }
+            : chat
+        )
+      );
+
+      const params = new URLSearchParams({
+        subject: subjectName,
+        classDate: selectedClass.classDate
+      });
+
+      const historyResponse = await fetch(`${API_URL}/api/chat/history?${params.toString()}`, {
+        headers: authHeaders
+      });
+      const historyData = await historyResponse.json();
+
+      if (!historyResponse.ok) {
+        throw new Error(historyData.message);
+      }
+
+      setChats(Array.isArray(historyData.chats) ? [...historyData.chats].reverse() : []);
+    } catch (error) {
+      setChats((prev) => prev.filter((chat) => chat._id !== tempId));
+      onError(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleQuizSelect = (quizId, questionId, optionKey) => {
+    setQuizState((prev) => {
+      const current = prev[String(quizId)] || { answers: {}, submitted: false, result: null };
+      if (current.submitted) return prev;
+      return {
+        ...prev,
+        [String(quizId)]: {
+          ...current,
+          answers: { ...current.answers, [questionId]: optionKey }
+        }
+      };
+    });
+  };
+
+  const handleQuizSubmit = async (quizId) => {
+    const state = quizState[String(quizId)] || { answers: {} };
+    setLoading(true);
+
+    try {
+      const tempId = `temp-${Date.now()}`;
+      setChats((prev) => [
+        ...prev,
+        { _id: tempId, question: "Submitting quiz...", answer: "", pending: true }
+      ]);
+
+      const response = await fetch(`${API_URL}/api/chat/quiz/submit`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders
+        },
+        body: JSON.stringify({
+          quizId,
+          answers: state.answers || {}
+        })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message);
+      }
+
+      setQuizState((prev) => ({
+        ...prev,
+        [String(quizId)]: {
+          ...(prev[String(quizId)] || { answers: {} }),
+          submitted: true,
+          result: data
+        }
+      }));
+
+      // Replace the temporary typing message with the saved score text immediately.
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat._id === tempId
+            ? { ...chat, question: "Quiz submitted", answer: data?.score ? `Score: ${data.score.correct}/${data.score.total} (${data.score.percent}%)` : "Submitted", pending: false }
+            : chat
+        )
+      );
+
+      const params = new URLSearchParams({
+        subject: subjectName,
+        classDate: selectedClass.classDate
+      });
+
+      const historyResponse = await fetch(`${API_URL}/api/chat/history?${params.toString()}`, {
+        headers: authHeaders
+      });
+      const historyData = await historyResponse.json();
+
+      if (!historyResponse.ok) {
+        throw new Error(historyData.message);
+      }
+
+      setChats(Array.isArray(historyData.chats) ? [...historyData.chats].reverse() : []);
     } catch (error) {
       onError(error);
     } finally {
@@ -513,54 +812,202 @@ const SubjectWorkspace = ({ authHeaders, subjects, onError }) => {
                 {selectedClass.teacherName ? <span>Teacher: {selectedClass.teacherName}</span> : null}
               </div>
 
+              <div className="pdf-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={handleLoadPdf}
+                  disabled={pdfLoading}
+                >
+                  {pdfLoading ? "Loading PDF..." : "View PDF"}
+                </button>
+                {pdfError ? <p className="empty-text">{pdfError}</p> : null}
+              </div>
+
+              {pdfUrl ? (
+                <div className="pdf-frame">
+                  <iframe title="Class PDF" src={pdfUrl} />
+                </div>
+              ) : null}
+
               <div className="summary-content">{renderRichText(selectedClass.summary)}</div>
             </article>
 
-            <section className="chat-grid">
-              <form className="chat-composer" onSubmit={handleAskQuestion}>
-                <div className="section-title">
-                  <p className="eyebrow">Ask This Class</p>
-                  <h3>Chat about what happened that day</h3>
-                </div>
-
-                <textarea
-                  value={question}
-                  onChange={(event) => setQuestion(event.target.value)}
-                  placeholder="What are the main learning points from this class?"
-                  rows="6"
-                />
-
-                <button className="primary-button" type="submit" disabled={loading}>
-                  {loading ? "Thinking..." : "Ask about this class"}
-                </button>
-
-                {answer ? (
-                  <article className="answer-panel">
-                    <p className="eyebrow">Latest Answer</p>
-                    <p>{answer}</p>
-                  </article>
-                ) : null}
-              </form>
-
-              <section className="history-panel">
+            <section className="chat-shell">
+              <section className="chat-thread">
                 <div className="section-title">
                   <p className="eyebrow">Revision Memory</p>
-                  <h3>Chat history</h3>
+                  <h3>Chat</h3>
                 </div>
 
                 {chats.length === 0 ? (
                   <p className="empty-text">No questions asked for this class yet.</p>
                 ) : (
-                  <div className="history-list">
+                  <div className="chat-messages">
                     {chats.map((chat) => (
-                      <article className="history-card" key={chat._id}>
-                        <strong>Q: {chat.question}</strong>
-                        <p>A: {chat.answer}</p>
-                      </article>
+                      <div className="chat-turn" key={chat._id}>
+                        <div className="chat-row chat-row-user">
+                          <div className="chat-bubble chat-bubble-user">
+                            {renderRichText(chat.question)}
+                          </div>
+                        </div>
+                        <div className="chat-row chat-row-assistant">
+                          <div className="chat-bubble chat-bubble-assistant">
+                            {chat.pending ? (
+                              <div className="typing" aria-label="Assistant is typing">
+                                <span />
+                                <span />
+                                <span />
+                              </div>
+                            ) : (() => {
+                              const quizPayload = parseQuizPayload(chat.answer);
+                              if (!quizPayload) return renderRichText(chat.answer);
+
+                              const quizId = String(quizPayload.quizId);
+                              const quiz = quizPayload.quiz;
+                              const state = quizState[quizId] || { answers: {}, submitted: false, result: null };
+                              const questions = Array.isArray(quiz?.questions) ? quiz.questions : [];
+                              const breakdown = Array.isArray(state.result?.breakdown) ? state.result.breakdown : [];
+                              const breakdownById = breakdown.reduce((acc, row) => {
+                                if (row?.id) acc[row.id] = row;
+                                return acc;
+                              }, {});
+
+                              const answered = Object.keys(state.answers || {}).length;
+                              const total = questions.length;
+
+                              return (
+                                <div className="quiz-card">
+                                  <div className="quiz-card-top">
+                                    <div>
+                                      <p className="eyebrow">Quiz</p>
+                                      <h4 className="quiz-title">{quiz.title || "Class Quiz"}</h4>
+                                      <p className="quiz-subtitle">
+                                        {quiz.difficulty ? `Difficulty: ${quiz.difficulty}` : null}
+                                        {total ? ` • ${answered}/${total} answered` : null}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="quiz-questions">
+                                    {questions.map((q, idx) => {
+                                      const selected = state.answers?.[q.id] || "";
+                                      const options = q.options || {};
+                                      const resultRow = breakdownById[q.id];
+                                      const correct = resultRow?.correct || "";
+                                      const isSubmitted = Boolean(state.submitted);
+                                      return (
+                                        <div className="quiz-q" key={q.id || idx}>
+                                          <p className="quiz-qtext">
+                                            <strong>{q.id || `Q${idx + 1}`}</strong>: {q.question}
+                                          </p>
+                                          <div className="quiz-options">
+                                            {["A", "B", "C", "D"].map((key) => (
+                                              <button
+                                                key={key}
+                                                type="button"
+                                                className={[
+                                                  "quiz-option",
+                                                  selected === key ? "quiz-option-active" : "",
+                                                  isSubmitted && correct === key ? "quiz-option-correct" : "",
+                                                  isSubmitted && selected === key && correct && correct !== key ? "quiz-option-wrong" : ""
+                                                ]
+                                                  .filter(Boolean)
+                                                  .join(" ")}
+                                                onClick={() => handleQuizSelect(quizId, q.id, key)}
+                                                disabled={loading || state.submitted}
+                                              >
+                                                <span className="quiz-option-key">{key}</span>
+                                                <span className="quiz-option-text">{options?.[key] || ""}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                          {state.submitted && resultRow ? (
+                                            <div className="quiz-feedback">
+                                              <p className="quiz-feedback-line">
+                                                Correct: <strong>{resultRow.correct}</strong>
+                                                {resultRow.selected ? (
+                                                  <>
+                                                    {" "}• You picked: <strong>{resultRow.selected}</strong>
+                                                  </>
+                                                ) : null}
+                                              </p>
+                                              {resultRow.explanation ? (
+                                                <p className="quiz-explanation">{resultRow.explanation}</p>
+                                              ) : null}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+
+                                  <div className="quiz-actions">
+                                    <button
+                                      className="primary-button"
+                                      type="button"
+                                      onClick={() => handleQuizSubmit(quizId)}
+                                      disabled={loading || state.submitted || total === 0 || answered < total}
+                                    >
+                                      {state.submitted ? "Submitted" : "Submit quiz"}
+                                    </button>
+                                    {!state.submitted && total > 0 && answered < total ? (
+                                      <p className="empty-text">Answer all questions to submit.</p>
+                                    ) : null}
+                                  </div>
+
+                                  {state.result?.score ? (
+                                    <div className="quiz-result">
+                                      <p className="eyebrow">Score</p>
+                                      <strong>
+                                        {state.result.score.correct}/{state.result.score.total} ({state.result.score.percent}%)
+                                      </strong>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </div>
                     ))}
+                    <div ref={chatScrollRef} />
                   </div>
                 )}
               </section>
+
+              <form className="chat-composer chat-composer-sticky" onSubmit={handleAskQuestion}>
+                <textarea
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      handleAskQuestion(event);
+                    }
+                  }}
+                  placeholder="Ask anything about this class..."
+                  rows="3"
+                />
+
+                <div className="chat-actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={handleGenerateQuiz}
+                    disabled={loading || !selectedClass}
+                  >
+                    Quiz
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="submit"
+                    disabled={loading || !question.trim()}
+                  >
+                    {loading ? "Thinking..." : "Send"}
+                  </button>
+                </div>
+              </form>
             </section>
           </>
         )}
@@ -571,9 +1018,7 @@ const SubjectWorkspace = ({ authHeaders, subjects, onError }) => {
 
 const AttendanceViewer = ({ enrolmentNumber, setEnrolmentNumber, setNotice }) => {
   const [loading, setLoading] = useState(false);
-  const [attendanceData, setAttendanceData] = useState(() =>
-    getCachedAttendance(enrolmentNumber)
-  );
+  const [attendanceData, setAttendanceData] = useState(null);
 
   const handleFetch = useCallback(async () => {
     setLoading(true);
@@ -593,15 +1038,57 @@ const AttendanceViewer = ({ enrolmentNumber, setEnrolmentNumber, setNotice }) =>
   }, [enrolmentNumber, setNotice]);
 
   useEffect(() => {
+    if (!enrolmentNumber) {
+      setAttendanceData(null);
+      return;
+    }
+
     const cached = getCachedAttendance(enrolmentNumber);
     if (cached) {
       setAttendanceData(cached);
+      return;
     }
-    if (!enrolmentNumber || attendanceData || loading) return;
+
+    if (loading) return;
     handleFetch();
-  }, [attendanceData, enrolmentNumber, handleFetch, loading]);
+  }, [enrolmentNumber, handleFetch, loading]);
 
   const attends = Array.isArray(attendanceData?.attends) ? attendanceData.attends : [];
+  const sortedAttends = useMemo(() => {
+    return [...attends].sort((a, b) => {
+      const aTime = a?.date ? new Date(a.date).getTime() : 0;
+      const bTime = b?.date ? new Date(b.date).getTime() : 0;
+      return bTime - aTime;
+    });
+  }, [attends]);
+
+  const attendanceStats = useMemo(() => {
+    let present = 0;
+    let absent = 0;
+    let unknown = 0;
+
+    for (const entry of attends) {
+      const status = String(entry?.status || "").toUpperCase();
+      if (status === "P" || entry?.present === true) present += 1;
+      else if (status === "A" || entry?.present === false) absent += 1;
+      else unknown += 1;
+    }
+
+    const total = present + absent + unknown;
+    const pct = total ? Math.round((present / total) * 100) : 0;
+
+    return { present, absent, unknown, total, pct };
+  }, [attends]);
+
+  const getStatusBadge = (entry) => {
+    const raw = String(entry?.status || "").toUpperCase();
+    if (raw === "P") return { label: "Present", variant: "present" };
+    if (raw === "A") return { label: "Absent", variant: "absent" };
+    if (entry?.present === true) return { label: "Present", variant: "present" };
+    if (entry?.present === false) return { label: "Absent", variant: "absent" };
+    if (raw) return { label: raw, variant: "unknown" };
+    return { label: "Unknown", variant: "unknown" };
+  };
 
   return (
     <section className="student-shell">
@@ -642,23 +1129,55 @@ const AttendanceViewer = ({ enrolmentNumber, setEnrolmentNumber, setNotice }) =>
           attends.length === 0 ? (
             <p className="empty-text">No attendance records found.</p>
           ) : (
-            <div className="attendance-list">
-              {attends.map((entry, index) => (
-                <article className="attendance-card" key={entry?._id || `${entry?.date}-${index}`}>
-                  <div className="attendance-card-top">
-                    <strong>{entry?.date ? formatDate(entry.date) : "Attendance"}</strong>
-                    {typeof entry?.status === "string" ? (
-                      <span className="chip">{entry.status}</span>
-                    ) : entry?.present !== undefined ? (
-                      <span className="chip">{entry.present ? "Present" : "Absent"}</span>
-                    ) : null}
-                  </div>
-                  <pre className="attendance-meta">
-                    {JSON.stringify(entry, null, 2)}
-                  </pre>
-                </article>
-              ))}
-            </div>
+            <>
+              <div className="attendance-summary">
+                <div className="attendance-summary-card">
+                  <p className="eyebrow">Total</p>
+                  <strong>{attendanceStats.total}</strong>
+                </div>
+                <div className="attendance-summary-card">
+                  <p className="eyebrow">Present</p>
+                  <strong>{attendanceStats.present}</strong>
+                </div>
+                <div className="attendance-summary-card">
+                  <p className="eyebrow">Absent</p>
+                  <strong>{attendanceStats.absent}</strong>
+                </div>
+                <div className="attendance-summary-card">
+                  <p className="eyebrow">Attendance</p>
+                  <strong>{attendanceStats.pct}%</strong>
+                </div>
+              </div>
+
+              <div className="attendance-list">
+                {sortedAttends.map((entry, index) => {
+                  const badge = getStatusBadge(entry);
+                  return (
+                    <article
+                      className="attendance-card"
+                      key={entry?._id || `${entry?.date}-${index}`}
+                    >
+                      <div className="attendance-card-top">
+                        <div>
+                          <strong>{entry?.date ? formatDate(entry.date) : "Attendance"}</strong>
+                          <p className="attendance-subtitle">
+                            {entry?.enrolmentNumber ? `Enrolment: ${entry.enrolmentNumber}` : null}
+                          </p>
+                        </div>
+                        <span className={`status-badge status-badge-${badge.variant}`}>
+                          {badge.label}
+                        </span>
+                      </div>
+
+                      <details className="attendance-details">
+                        <summary>Details</summary>
+                        <pre className="attendance-meta">{JSON.stringify(entry, null, 2)}</pre>
+                      </details>
+                    </article>
+                  );
+                })}
+              </div>
+            </>
           )
         ) : (
           <p className="empty-text">
@@ -679,6 +1198,7 @@ const TeacherDashboard = ({ authHeaders, user, onError, notice, setNotice }) => 
   });
   const [teacherDocuments, setTeacherDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [openingPdfId, setOpeningPdfId] = useState("");
 
   const fetchTeacherDocuments = async () => {
     try {
@@ -755,6 +1275,25 @@ const TeacherDashboard = ({ authHeaders, user, onError, notice, setNotice }) => 
       setLoading(false);
     }
   };
+
+  const handleOpenTeacherPdf = useCallback(
+    async (documentId) => {
+      if (!documentId) return;
+      setOpeningPdfId(String(documentId));
+      setNotice("");
+
+      try {
+        const url = await fetchPdfObjectUrl({ documentId, authHeaders });
+        window.open(url, "_blank", "noopener,noreferrer");
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      } catch (error) {
+        onError(error);
+      } finally {
+        setOpeningPdfId("");
+      }
+    },
+    [authHeaders, onError, setNotice]
+  );
 
   return (
     <section className="teacher-shell">
@@ -838,14 +1377,14 @@ const TeacherDashboard = ({ authHeaders, user, onError, notice, setNotice }) => 
                   </div>
                   <p className="doc-file">{document.originalFileName}</p>
                   {document._id ? (
-                    <a
+                    <button
                       className="file-link"
-                      href={`${API_URL}/api/pdf/documents/${document._id}/file`}
-                      target="_blank"
-                      rel="noreferrer"
+                      type="button"
+                      onClick={() => handleOpenTeacherPdf(document._id)}
+                      disabled={openingPdfId === String(document._id)}
                     >
-                      View PDF
-                    </a>
+                      {openingPdfId === String(document._id) ? "Opening..." : "View PDF"}
+                    </button>
                   ) : null}
                   <div className="summary-content">{renderRichText(document.summary)}</div>
                 </article>
