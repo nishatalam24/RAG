@@ -15,6 +15,8 @@ Simple beginner-friendly backend using Node.js, Express, MongoDB, LanceDB, JWT a
 - Store user, document, and chat history in MongoDB
 - Ask questions from uploaded PDFs
 - Include last 20 chats as memory
+- Run C/C++ code on the server (compile + execute)
+- LLM-based code analysis (time/space complexity + suggestions + rewritten code)
 
 ## Install
 
@@ -51,6 +53,16 @@ LANCEDB_PATH=./lancedb_data
 FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
 # Easier on a server:
 FIREBASE_SERVICE_ACCOUNT_PATH=/home/ubuntu/geofence/firebase-service-account.json
+
+# Optional: server-side code runner limits
+# CODE_RUN_TIMEOUT_MS=4000
+# CODE_RUN_COMPILE_TIMEOUT_MS=12000
+# CODE_RUN_MAX_CODE_CHARS=80000
+# CODE_RUN_MAX_INPUT_CHARS=40000
+# CODE_RUN_MAX_OUTPUT_CHARS=120000
+# Optional: override compilers
+# CC=gcc
+# CXX=g++
 
 ### Reset / Flush everything
 
@@ -94,6 +106,18 @@ Server URL:
 ```txt
 http://localhost:5000
 ```
+
+## Code Runner API (C/C++)
+
+Compile + run:
+
+- `POST /run` (alias) or `POST /api/code/run`
+- Body: `{ "language": "cpp" | "c", "code": "...", "inputs": "1 2\\n" }` (inputs can also be an array of lines)
+
+Analyze + rewrite with Gemini:
+
+- `POST /api/code/analyze`
+- Body: `{ "language": "cpp" | "c", "code": "...", "prompt": "optional extra request" }`
 
 ## Run On A Cloud Server Without Domain
 

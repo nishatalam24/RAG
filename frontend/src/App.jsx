@@ -9,6 +9,7 @@ import {
   useNavigate,
   useParams
 } from "react-router-dom";
+import CodeEditor from "./components/CodeEditor.jsx";
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -1774,11 +1775,19 @@ function AppContent() {
                   <NavLink className="nav-chip" to="/attendance">
                     Attendance
                   </NavLink>
+                  <NavLink className="nav-chip" to="/compiler">
+                    Compiler
+                  </NavLink>
                 </>
               ) : (
-                <NavLink className="nav-chip" to="/teacher">
-                  Teacher
-                </NavLink>
+                <>
+                  <NavLink className="nav-chip" to="/teacher">
+                    Teacher
+                  </NavLink>
+                  <NavLink className="nav-chip" to="/compiler">
+                    Compiler
+                  </NavLink>
+                </>
               )}
               <button className="nav-chip nav-chip-button" type="button" onClick={logout}>
                 Logout
@@ -1816,6 +1825,7 @@ function AppContent() {
               />
             }
           />
+          <Route path="/compiler" element={<CodeEditor apiUrl={API_URL} />} />
           <Route path="*" element={<Navigate to="/teacher" replace />} />
         </Routes>
       ) : (
@@ -1831,6 +1841,7 @@ function AppContent() {
               />
             }
           />
+          <Route path="/compiler" element={<CodeEditor apiUrl={API_URL} />} />
           <Route
             path="/subjects/:subjectSlug"
             element={
